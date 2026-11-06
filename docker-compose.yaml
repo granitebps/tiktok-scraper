@@ -1,10 +1,36 @@
 services:
   tiktok-scraper:
     build: .
+    image: tiktok-scraper:local
+    container_name: tiktok-scraper
+    init: true
     restart: unless-stopped
-    ports:
-      - "8000:8000"
+    networks:
+      - ai-routing
     environment:
       - PORT=8000
-      # Optional — only if TikTok is blocked where you run, or at high volume.
-      # - TIKTOK_PROXY=http://user:pass@host:port
+      - TIKTOK_PROXY=${TIKTOK_PROXY:-}
+      - MCP_TOOL_TIMEOUT=${MCP_TOOL_TIMEOUT:-45}
+      - MCP_MAX_CONCURRENCY=${MCP_MAX_CONCURRENCY:-4}
+      - MCP_CACHE_SIZE=${MCP_CACHE_SIZE:-500}
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    mem_reservation: 64m
+    cpus: 0.5
+    pids_limit: 64
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  ai-routing:
+    external: true
+    name: ai-routing

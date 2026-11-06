@@ -31,8 +31,9 @@ reads both dialects and prefers the exact counters.
 
 Media links (checked 2026-10-05 from fresh exits with no cookies):
 `video.play_link` and every `qualities[].play_link` prefer TikTok's
-`www.tiktok.com/aweme/v1/play/` form, which streams the mp4 with no cookie
-and no Referer — but only to IPs in the region that hosts the video (a US
+`www.tiktok.com/aweme/v1/play/` form. The 2026-11-06 direct-egress probe needed
+`Referer: https://www.tiktok.com/` (returned as `video.request_headers`),
+with no cookies. Availability also depends on the video's region (a US
 video answered 206 video/mp4 from US exits and an HTML page from German
 ones, whichever exit minted the link). The CDN-host forms that follow it in
 `play_links`, and `download_link`, answer 403 without the minting session's
@@ -523,6 +524,7 @@ def video_file(raw):
         "origin_cover": first_link(raw.get("originCover")),
         "animated_cover": first_link(raw.get("dynamicCover")),
         "play_link": play_links[0] if play_links else (qualities[0]["play_link"] if qualities else None),
+        "request_headers": {"Referer": "https://www.tiktok.com/"},
         "download_link": first_link(raw.get("downloadAddr")),
         "qualities": qualities,
         "subtitles": subtitles(raw.get("subtitleInfos")),

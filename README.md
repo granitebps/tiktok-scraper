@@ -1,162 +1,199 @@
-# 🎵 TikTok Scraper
+# TikTok Scraper MCP
 
-TikTok Scraper is a **free and open-source** scraper that gets you **unlimited** detailed TikTok data for free.
+Five read-only MCP tools for public TikTok posts and profiles, built on
+[omkarcloud/tiktok-scraper](https://github.com/omkarcloud/tiktok-scraper).
+The server talks directly to TikTok using browser-impersonated HTTP and the
+bundled request signer. No Apify or RapidAPI key, account, or browser is required.
+TikTok can still block a particular IP or region; direct access is not guaranteed.
 
-## ✨ What Can I Get?
+## Tools
 
-- 🎬 **Full details on any video** — play / like / comment / share counts, every MP4 quality, sound, hashtags & captions
-- 👤 **Profiles, videos & followers of 1B+ users** — bio, follower counts, latest / popular videos, playlists
-- 🔍 **Search videos, users, hashtags, sounds & live streams** — plus trending and Explore feeds for any country
-- 📢 **Ads intelligence** — TikTok's EU/UK ad library with targeting & reach, and Creative Center's top ads
+| Tool | Inputs | Result |
+|---|---|---|
+| `search_posts` | `query`, `sort`, `published`, `cursor`, `limit`, `country` | Matching posts in `videos`, including video and photo post records when returned by TikTok. |
+| `get_post` | `post`, `country` | Full caption, creator, stats, video/media metadata, ordered photo slides, subtitle links and canonical link. |
+| `get_post_comments` | `post`, `cursor`, `limit`, `country` | Ranked top-level `comments`, with authors, likes and reply counts. Nested replies are not included. |
+| `get_profile` | `username` | Bio, links, counters, verification, privacy status and profile metadata. |
+| `get_profile_posts` | `username`, `sort`, `cursor`, `limit`, `country` | The user's posts in `videos`, including photo posts. |
 
-## 🎥 Example: A Full TikTok Video
+- `post` accepts a numeric video/photo ID, a canonical TikTok link, or a
+  supported share link (`vm.tiktok.com`, `vt.tiktok.com`, `tiktok.com/t/...`).
+- `username` accepts a username, `@username`, profile link or `secUid`. A numeric
+  string is treated as a username; numeric account ID lookup is not supported.
+- Search `sort`: `relevance` (default) or `likes`. Optional `published`: `day`,
+  `week`, `month`, `3months`, `6months`.
+- Profile post `sort`: `latest` (default), `popular`, `oldest`.
+- Lists default to five items, with `limit` from 1 to 12. While `has_more` is
+  true, pass `next_cursor` unchanged as `cursor`, keeping the other inputs the
+  same. A cursor includes the offset within TikTok's page so small responses
+  do not discard the remaining items. Paging reflects live results; pages can
+  change after cache expiry or a server restart. Restart a changed page if
+  the server reports an invalid cursor.
+- IDs remain strings to preserve TikTok's 19–20 digit values.
+- Responses contain structured JSON and matching compact JSON text. Null/empty
+  nested fields, avatar URLs and duplicate playback URL lists are omitted.
+  List results also omit alternate renditions, covers and subtitle tracks;
+  use `get_post` for full media detail. Zero counts and false flags are kept.
 
-```json
-{
-  "id": "7692114317151423775",
-  "link": "https://www.tiktok.com/@tiktok/video/7692114317151423775",
-  "type": "video",
-  "description": "ATEEZ on the FYF. BTS on tour. dance challenges on repeat. @rachelszero and friends reminisce on K-Pop Summer on TikTok",
-  "language": "en",
-  "created_at": "2026-10-02T16:52:37Z",
-  "is_ad": false,
-  "stats": { "play_count": 279100, "like_count": 4696, "comment_count": 2041, "share_count": 457, "save_count": 438, "repost_count": 0 },
-  "author": { "id": "107955", "username": "tiktok", "nickname": "TikTok", "link": "https://www.tiktok.com/@tiktok", "is_verified": true },
-  "author_stats": { "follower_count": 96100000, "like_count": 465100000, "video_count": 1510 },
-  "music": { "id": "7692114426937346847", "title": "original sound", "author_name": "TikTok", "duration_seconds": 65, "play_link": "https://v16m.tiktokcdn-us.com/..." },
-  "video": {
-    "duration_seconds": 65,
-    "width": 720,
-    "height": 1280,
-    "cover": "https://p19-common-sign.tiktokcdn-us.com/...",
-    "play_link": "https://www.tiktok.com/aweme/v1/play/?...",
-    "qualities": [
-      { "quality": "1080p", "codec": "h265_hvc1", "width": 1080, "height": 1920, "play_link": "https://www.tiktok.com/aweme/v1/play/?..." },
-      { "quality": "720p", "codec": "h264", "width": 720, "height": 1280, "play_link": "https://www.tiktok.com/aweme/v1/play/?..." }
-    ],
-    "subtitles": [ { "language": "eng-US", "is_auto_generated": true, "format": "webvtt", "link": "https://v16m-webapp.tiktokcdn-us.com/..." } ]
-  },
-  "mentions": [ { "id": "6805952240777085958", "username": "rachelszero", "link": "https://www.tiktok.com/@rachelszero" } ],
-  "suggested_searches": ["dance", "dance tiktoks", "kpop dance"]
-}
-```
+## Media contract for Fami and other clients
 
-*Trimmed for readability.*
-
-## 🚀 Unlimited Free TikTok Data — Get It in 60 Seconds
-
-1️⃣ Clone and install:
-```bash
-git clone https://github.com/omkarcloud/tiktok-scraper
-cd tiktok-scraper
-python -m pip install -r requirements.txt
-```
-
-2️⃣ Start the API:
-```bash
-python run.py
-```
-
-3️⃣ Get your first data:
-```bash
-curl "http://localhost:8000/videos/details?video=7692114317151423775"
-```
+`get_post` keeps the creator, caption, canonical `link`, and media needed for
+reference capture. `type: "photo"` returns **all** slides in `images`, in the
+original order. `type: "video"` returns `video.play_link`, duration, available
+qualities, subtitle links and the headers required for playback:
 
 ```json
 {
-  "id": "7692114317151423775",
-  "link": "https://www.tiktok.com/@tiktok/video/7692114317151423775",
-  "type": "video",
-  "description": "ATEEZ on the FYF. BTS on tour. dance challenges on repeat. @rachelszero and friends reminisce on K-Pop Summer on TikTok",
-  "created_at": "2026-10-02T16:52:37Z",
-  "stats": { "play_count": 279100, "like_count": 4696, "comment_count": 2041, "share_count": 457, "save_count": 438, "repost_count": 0 },
-  "author": { "id": "107955", "username": "tiktok", "nickname": "TikTok", "link": "https://www.tiktok.com/@tiktok", "is_verified": true },
-  "author_stats": { "follower_count": 96100000, "like_count": 465100000, "video_count": 1510 },
-  "music": { "id": "7692114426937346847", "title": "original sound", "author_name": "TikTok", "duration_seconds": 65 },
   "video": {
-    "duration_seconds": 65,
-    "width": 720,
-    "height": 1280,
     "play_link": "https://www.tiktok.com/aweme/v1/play/?...",
-    "qualities": [ { "quality": "1080p", "codec": "h265_hvc1", "play_link": "https://www.tiktok.com/aweme/v1/play/?..." } ]
+    "request_headers": { "Referer": "https://www.tiktok.com/" }
   }
 }
 ```
 
-All 41 endpoints are now live at `http://localhost:8000`.
+Download `video.play_link` with `video.request_headers`. The direct-egress
+qualification returned HTTP 403 without this Referer and HTTP 206 MP4 bytes
+with it, including with Fami's downloader User-Agent. Prefer `play_link` over
+`download_link`: CDN alternatives can require TikTok session cookies. Photo
+`images[].link` URLs were independently downloadable without cookies.
 
-TikTok answers plain requests from an ordinary residential IP in a country where TikTok is available, so no proxy is needed. If TikTok is blocked where you run (India, for example), set `TIKTOK_PROXY=http://user:pass@host:port` — put `{country}` in the URL where your provider takes a country code and the scraper asks each request from the country it needs (TikTok answers user search only from Europe and video search only from the US).
+Media URLs are signed and expire. Download promptly, inspect the HTTP status
+and content type, and preserve slide order. Video accessibility also depends
+on regional egress; returning metadata does not guarantee every client IP can
+fetch every video. The MCP returns URLs and public headers, never cookies or
+proxy credentials. It does not download full media files, transcribe speech,
+or analyze the video/images. Those remain client responsibilities.
 
-## 📚 Endpoints
+The household-ai integration is separate: it must map this response and apply
+these headers in its downloader. This repository does not change Fami's
+provider selection or replace its Apify capture path automatically.
 
-41 endpoints cover everything you need.
+## Run locally
 
-| Endpoint | Path | Returns |
-|---|---|---|
-| Video Details | `/videos/details` | Everything about one video or photo post in a single call |
-| Video Media | `/videos/media` | Every MP4 quality, photos, covers, subtitles & the sound |
-| Video Comments / Replies | `/videos/comments`, `/videos/comment-replies` | Comments with likes, reply counts & authors, 50 per page |
-| Video Transcript | `/videos/transcript` | Captions as timed segments plus the full text |
-| Related Videos | `/videos/related` | What TikTok recommends next to a video |
-| Resolve Video | `/videos/resolve` | Any link or share link → video ID, canonical link & author |
-| User Profile | `/users/profile` | Bio, bio link, follower / like / video counts, verification, live status |
-| User Videos / Reposts | `/users/videos`, `/users/reposts` | Latest, popular or oldest videos, 35 per page |
-| User Followers / Following | `/users/followers`, `/users/following` | 30 accounts per page, each with counters |
-| User Playlists / Collections | `/users/playlists`, `/users/collections` | Playlists and public collections with covers & counts |
-| Resolve User | `/users/resolve` | Username ↔ ID ↔ secUid with follower count |
-| Search Videos | `/search/videos` | 20 per page; sort by relevance or likes, filter by date |
-| Search Users / Top / Live | `/search/users`, `/search/top`, `/search/live` | Accounts, TikTok's Top tab, live streams with viewer counts |
-| Search Suggestions | `/search/suggestions` | What the search box suggests while typing |
-| Hashtag Details / Videos | `/hashtags/details`, `/hashtags/videos` | Video count, total views; videos in ranked order |
-| Music Details / Videos | `/music/details`, `/music/videos` | Sound info with Apple Music / Spotify ids; videos using it |
-| Playlist / Collection Videos | `/playlists/details`, `/playlists/videos`, `/collections/videos` | Playlists and collections, 30 videos per page |
-| Place Details / Videos | `/places/details`, `/places/videos` | Address, category, photos; videos tagged there |
-| Effect Details | `/effects/details` | Effect name, icon & creator |
-| Trending / Explore Feeds | `/feed/trending`, `/feed/explore`, `/feed/explore/categories` | For You and Explore feeds for any country, 30 videos per call |
-| Live Room | `/live/details` | Is the account live now: title, viewers, category, stream links |
-| Ad Library | `/ads/search`, `/ads/details`, `/ads/advertisers`, `/ads/countries` | EU/UK ads with advertiser, targeting & reach by age and gender |
-| Top Ads | `/ads/top`, `/ads/top/details`, `/ads/top/filters` | Creative Center's best-performing ads by country, period & metric |
+Requires Python 3.12.
 
-## 🔍 Exploring Parameters
-
-The same API is published on RapidAPI, and its playground is the easiest place to try parameters and see raw responses. Once a request looks right, run it locally for **unlimited free** data.
-
-1. [Subscribe to the free plan](https://rapidapi.com/OmkarCloud/api/best-tiktok-scraper-free-1000-calls/pricing) — 1,000 calls/month, no credit card.
-2. [Try the endpoints in the playground](https://rapidapi.com/OmkarCloud/api/best-tiktok-scraper-free-1000-calls/playground) — every param is pre-filled, so you see real data in one click.
-3. Copy the generated code and replace `https://best-tiktok-scraper-free-1000-calls.p.rapidapi.com` with `http://localhost:8000`. It will now run against your local API.
-
-```python
-import requests
-
-# generated by the playground, host swapped for the local API
-response = requests.get(
-    "http://localhost:8000/videos/details",
-    params={"video": "7692114317151423775"},
-)
-print(response.json())
+```bash
+python3.12 -m venv .venv
+.venv/bin/pip install -r requirements.txt
 ```
 
-## 💬 Have Questions? We Have Answers.
+Use absolute paths in your MCP client's configuration:
 
-You're a developer — we know how hard completing a project can be. So we offer full support: just message us and we'll reply ✅ with a solution within 1 working day.
+```json
+{
+  "mcpServers": {
+    "tiktok": {
+      "command": "/absolute/path/to/tiktok-scraper/.venv/bin/python",
+      "args": ["/absolute/path/to/tiktok-scraper/mcp_server.py", "--stdio"]
+    }
+  }
+}
+```
 
-[![Message Us on WhatsApp about TikTok Scraper](https://raw.githubusercontent.com/omkarcloud/assets/master/images/whatsapp-us.png)](https://www.omkar.cloud/l/tiktok-scraper-github-whatsapp)
+For a local HTTP client:
 
-[![Ask Us by Email about TikTok Scraper](https://raw.githubusercontent.com/omkarcloud/assets/master/images/ask-on-email.png)](mailto:happy.to.help@omkar.cloud?subject=Help%20with%20TikTok%20Scraper%20API&body=I%20need%20help%20using%20the%20TikTok%20Scraper%20API.)
+```bash
+.venv/bin/python mcp_server.py
+```
 
-## ⚡ Popular Scrapers by Omkar Cloud
+This serves Streamable HTTP at `http://127.0.0.1:8000/mcp` and process health
+at `/health`. Stdio does not bind a port. Logging stays on stderr.
 
-- [**Google Maps Scraper (3,100+ GitHub Stars)**](https://github.com/omkarcloud/google-maps-scraper) — type "dentists in New York", get every business as a ready-to-call lead list: phones, emails, websites & reviews. Up to 100K free leads/month.
-- [**IMDb Scraper**](https://github.com/omkarcloud/imdb-scraper) — movies, TV shows, ratings, cast & box office
-- [**Threads Scraper**](https://github.com/omkarcloud/threads-scraper) — Threads posts, profiles, replies & search
-- [**G2 Scraper**](https://www.omkar.cloud/tools/g2-scraper) — G2 product details, ratings & AI-found contacts
-- [**Website Email Contact Scraper**](https://www.omkar.cloud/tools/website-email-contact-scraper) — emails, phones & socials from any website
-- [**AliExpress Scraper**](https://www.omkar.cloud/tools/aliexpress-scraper-api) — live product details, SKU variants, stock & shipping
+## Homeserver deployment
 
-## ⭐ Love It? [Star It ⭐!](https://github.com/omkarcloud/tiktok-scraper)
+The Compose service follows the Threads/Instagram deployment pattern: private
+external `ai-routing` network, no published ports, non-root user, read-only
+filesystem, temporary `/tmp`, dropped capabilities and bounded resources.
+The initial 256 MiB / 0.5 CPU limits require measurement on the actual host.
+The image retains Debian slim for curl_cffi's native libraries.
 
-Star the repo ⭐ and become my star hero!
+```bash
+docker network inspect ai-routing >/dev/null 2>&1 || docker network create ai-routing
+docker compose up -d --build
+```
 
-It's just 1 click, but it means the world to me.
+A client on `ai-routing` connects to `http://tiktok-scraper:8000/mcp` using
+`streamable-http`. Configure its tool filter to include only the five tools
+listed above. The HTTP server has no application authentication: keep it on
+this private network, or provide an authenticated gateway if exposing it.
 
-[![Star us on GitHub](https://raw.githubusercontent.com/omkarcloud/google-maps-scraper/master/screenshots/star-us.png)](https://github.com/omkarcloud/tiktok-scraper)
+`GET /health` checks process health, not TikTok reachability. The live smoke
+check below qualifies the upstream paths. Check on the homeserver as well as
+locally because the two connections can receive different TikTok responses.
+
+## Configuration
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `MCP_HOST` | `127.0.0.1` (`0.0.0.0` in image) | HTTP bind address |
+| `PORT` | `8000` | HTTP/REST port |
+| `MCP_TOOL_TIMEOUT` | `45` | Overall seconds per tool, including queue time and upstream retries |
+| `MCP_MAX_CONCURRENCY` | `4` | Simultaneous tool calls |
+| `MCP_CACHE_SIZE` | `500` | In-memory LRU result entries; `0` disables caching |
+| `TIKTOK_PROXY` | unset | Optional proxy URL; `{country}` is replaced with the selected country |
+
+Cache TTLs are in `tiktok/cache_config.py`: profile 30 minutes; search, post,
+comments and profile posts 10 minutes. A validated input and upstream cursor
+identify a cache entry. Upstream failures and results fetched after the deadline
+are not cached. Restart to apply configuration changes or clear caches.
+
+`country` changes TikTok's requested region. It changes the physical egress
+only when a configured proxy supports country selection. A new HTTP session
+also does not rotate an IP. Search starts at `/search` to obtain cookies;
+profile bootstrap pages can be challenged independently. TikTok's signer and
+endpoints can change, and blocked results are reported as errors.
+
+Tool failures use `isError: true` and:
+
+```json
+{"error":{"code":"upstream_blocked","message":"...","retryable":true}}
+```
+
+Codes: `invalid_input`, `not_found`, `upstream_rejected`, `upstream_blocked`,
+`timeout`, `upstream_unavailable`, `internal_error`. Protocol/schema validation
+errors are also MCP errors and may use the SDK's validation text. A retryable
+error is a hint to the client; the tool does not automatically launch another
+call or paid provider. Existing bounded upstream attempts share one deadline.
+
+## Verification
+
+Offline tests exercise the actual parsers against captured payloads, plus MCP
+tool contracts, input normalization, errors, cache eviction, pagination,
+concurrency and deadlines:
+
+```bash
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest -q
+```
+
+Live checks use the actual MCP protocol and TikTok. They print small receipts
+and save no media files or signed URLs. Samples can be changed if deleted or
+restricted. A failed check exits nonzero.
+
+```bash
+# Launch this repo as an MCP subprocess and check all five tools plus media
+.venv/bin/python scripts/smoke_mcp.py
+
+# Cross upstream page boundaries for search, comments and profile posts
+.venv/bin/python scripts/smoke_mcp.py --limit 12 --pages 5
+
+# Qualify a running HTTP server
+.venv/bin/python scripts/smoke_mcp.py --url http://127.0.0.1:8000/mcp
+```
+
+Video/photo download checks request only a small byte range. They prove
+initial accessibility and content type, not a complete download, decoding,
+transcription or media-model processing. Homeserver runtime qualification
+and the eventual Fami integration are separate checks.
+
+## REST and direct Python access
+
+The original 41-endpoint REST API remains available with `python run.py`.
+It is not the image's default process. `main.py` shows direct Python usage;
+import the scraper modules directly for individual operations. The MCP wraps
+only the five selected capabilities and reuses their validation and parsers.
+
+## License
+
+See [LICENSE](LICENSE) and the attribution in `tiktok/signer.py` for the
+bundled signer. Upstream project: [omkarcloud/tiktok-scraper](https://github.com/omkarcloud/tiktok-scraper).

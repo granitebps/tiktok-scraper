@@ -1,20 +1,16 @@
-"""Configuration for the TikTok Scraper. Everything can be set with an
-environment variable; the defaults work out of the box.
+"""TikTok transport configuration. Direct access depends on TikTok's current
+response to the server's IP; it is not a guarantee of proxy-free access.
 
     PORT          port the API listens on (default 8000)
     TIKTOK_PROXY  proxy URL for every request, e.g. http://user:pass@host:port
-                  (default: none — direct). TikTok answers plain requests from
-                  an ordinary residential IP in a country where TikTok is
-                  available, so you very likely don't need this. Set it if
-                  TikTok is blocked where you run (India, for example), or if
-                  a user's videos start coming back empty at high volume —
-                  TikTok retires an IP for that endpoint after ~20 calls.
+                  (default: none — direct). Set it if direct access is blocked
+                  or if regional access is needed. Creating new sessions does
+                  not rotate the IP; that requires support from the proxy.
                   If your proxy provider targets countries through the URL,
                   put `{country}` where the 2-letter code goes, e.g.
                   http://user-cr.{country}:pass@host:port — the scraper then
-                  asks each request from the country it needs (TikTok answers
-                  user search only from Europe and video search only from
-                  the US).
+                  asks requests through the selected country. Region behavior
+                  varies by endpoint and may change.
 
 Everything else below is a plain constant with a working default — edit it
 here if you need to.

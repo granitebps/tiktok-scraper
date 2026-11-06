@@ -27,7 +27,7 @@ import config
 
 from . import parsers as P
 from . import shared
-from .fetch import TikTokBlocked, TikTokNotFound, TikTokUpstreamError, api, country_order, eu_country, get_page
+from .fetch import TikTokBlocked, TikTokNotFound, TikTokTimeout, TikTokUpstreamError, api, country_order, eu_country, get_page
 
 LOOKUP_TTL = 600
 _lookup_lock = threading.Lock()
@@ -72,6 +72,8 @@ def lookup(user):
                       not_found=shared.USER_NOT_FOUND, label=label)
         info = payload.get("userInfo")
     except TikTokNotFound:
+        raise
+    except TikTokTimeout:
         raise
     except TikTokUpstreamError:
         if not user.get("username"):

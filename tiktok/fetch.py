@@ -1,10 +1,10 @@
 """TikTok transport: plain curl_cffi with browser-impersonated TLS through
-sticky residential exits. No browser, no login.
+optional residential exits. No browser, no login.
 
 Validated 2026-10-05 through US / GB / DE residential exits. TikTok is not
 reachable from direct Indian egress at all (TCP timeout), and the pod's own
-US datacenter egress is untested — config.TIKTOK_USE_PROXY keeps everything
-on residential exits.
+US datacenter egress was untested. Direct access is supported, but changing a
+region parameter or creating a session does not change the physical exit IP.
 
 Upstream surfaces:
 
@@ -31,7 +31,7 @@ Upstream surfaces:
     user/list, user/playlist, mix/item_list, explore/item_list,
     search/general/preview) and are sent bare.
     Search answers `status_code 2483 "Please login"` to a session with no
-    cookies: `boot=True` first loads one profile page, which sets ttwid /
+    cookies: `boot=True` first loads the search page, which sets ttwid /
     tt_csrf_token / tt_chain_token and yields the page's own device id.
     msToken is taken from the session's cookie jar when TikTok has issued
     one and sent empty otherwise — a made-up token is refused.
@@ -64,6 +64,7 @@ Failure taxonomy (scraper_errors, mapped to HTTP by route_glue):
   TikTokBadRequest     upstream rejected the params                       — never retried
   TikTokNotFound       unknown user / video / hashtag / sound ...         — never retried
 """
+import contextvars
 import hashlib
 import json
 import os
@@ -74,6 +75,7 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from urllib.parse import urlencode
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -98,7 +100,7 @@ API_TIMEOUT = 30
 PAGE_TIMEOUT = 45
 FANOUT_WORKERS = 4
 SESSIONS_PER_COUNTRY = 2       # fresh exits tried per country before moving on
-BOOT_PATH = "/@tiktok"         # any profile page sets the session cookies
+BOOT_PATH = "/search"          # profile pages can return a challenge without cookies
 
 LOGIN_WALL_STATUS = 2483       # "Please login your account first" (search without cookies)
 
@@ -128,6 +130,41 @@ class TikTokBadRequest(BadRequest):
 
 class TikTokNotFound(NotFound):
     """The user / video / hashtag / sound ... does not exist — never retried."""
+
+
+class TikTokTimeout(TikTokUpstreamError):
+    """The caller's total request budget expired."""
+
+
+_deadline = contextvars.ContextVar("tiktok_deadline", default=None)
+
+
+@contextmanager
+def deadline(seconds):
+    end = time.monotonic() + seconds
+    parent = _deadline.get()
+    token = _deadline.set(min(parent, end) if parent is not None else end)
+    try:
+        yield
+        _timeout(API_TIMEOUT)
+    finally:
+        _deadline.reset(token)
+
+
+def _timeout(default):
+    end = _deadline.get()
+    if end is None:
+        return default
+    left = end - time.monotonic()
+    if left <= 0:
+        raise TikTokTimeout("ran out of time waiting for tiktok.com")
+    return min(default, left)
+
+
+def _transport_error(error):
+    _timeout(API_TIMEOUT)
+    # curl errors may contain proxy credentials or signed URLs.
+    return TikTokUpstreamError(f"request failed: {type(error).__name__}")
 
 
 def default_country():
@@ -243,9 +280,11 @@ def _load_page(client, path):
     """GET one www page on `client` -> its rehydration scope. Also adopts
     the page's own device id, so a page load doubles as the session boot."""
     try:
-        resp = client.session.get(WWW + path, headers=PAGE_HEADERS, timeout=PAGE_TIMEOUT, allow_redirects=True)
+        resp = client.session.get(WWW + path, headers=PAGE_HEADERS, timeout=_timeout(PAGE_TIMEOUT), allow_redirects=True)
+    except TikTokTimeout:
+        raise
     except Exception as e:
-        raise TikTokUpstreamError(f"request failed: {type(e).__name__}: {e}")
+        raise _transport_error(e) from None
     status = resp.status_code
     if status in (401, 403, 429):
         raise TikTokBlocked(f"HTTP {status} on {path}")
@@ -324,9 +363,11 @@ def _api_once(client, path, params, *, signed, base, host, referer):
         query_string = urlencode(query)
     try:
         resp = client.session.get(f"{host}{path}?{query_string}",
-                                  headers={"accept": "*/*", "referer": referer or WWW + "/"}, timeout=API_TIMEOUT)
+                                  headers={"accept": "*/*", "referer": referer or WWW + "/"}, timeout=_timeout(API_TIMEOUT))
+    except TikTokTimeout:
+        raise
     except Exception as e:
-        raise TikTokUpstreamError(f"request failed: {type(e).__name__}: {e}")
+        raise _transport_error(e) from None
     status = resp.status_code
     text = resp.text or ""
     if status in (401, 403, 429):
@@ -388,6 +429,9 @@ def api(path, params, *, country=None, countries=None, signed=True, boot=False, 
             except TikTokBadRequest:
                 _release(client)
                 raise
+            except TikTokTimeout:
+                client.close()
+                raise
             except TikTokUpstreamError as e:
                 last = e
                 client.close()
@@ -416,6 +460,9 @@ def get_page(path, *, country=None, countries=None):
             client = _acquire(code)
             try:
                 scope = _load_page(client, path)
+            except TikTokTimeout:
+                client.close()
+                raise
             except TikTokUpstreamError as e:
                 last = e
                 client.close()
@@ -432,10 +479,13 @@ def resolve_redirect(url, *, country=None):
     for _ in range(SESSIONS_PER_COUNTRY + 1):
         client = _acquire((country or default_country()).lower())
         try:
-            resp = client.session.get(url, headers=PAGE_HEADERS, timeout=PAGE_TIMEOUT, allow_redirects=True)
-        except Exception as e:
-            last = TikTokUpstreamError(f"request failed: {type(e).__name__}: {e}")
+            resp = client.session.get(url, headers=PAGE_HEADERS, timeout=_timeout(PAGE_TIMEOUT), allow_redirects=True)
+        except TikTokTimeout:
             client.close()
+            raise
+        except Exception as e:
+            client.close()
+            last = _transport_error(e)
             continue
         _release(client)
         if resp.status_code == 404:
@@ -450,10 +500,13 @@ def get_text(url, *, country=None):
     for _ in range(SESSIONS_PER_COUNTRY + 1):
         client = _acquire((country or default_country()).lower())
         try:
-            resp = client.session.get(url, headers={"accept": "*/*", "referer": WWW + "/"}, timeout=API_TIMEOUT)
-        except Exception as e:
-            last = TikTokUpstreamError(f"request failed: {type(e).__name__}: {e}")
+            resp = client.session.get(url, headers={"accept": "*/*", "referer": WWW + "/"}, timeout=_timeout(API_TIMEOUT))
+        except TikTokTimeout:
             client.close()
+            raise
+        except Exception as e:
+            client.close()
+            last = _transport_error(e)
             continue
         _release(client)
         if resp.status_code == 200 and resp.text:
@@ -473,11 +526,13 @@ def _ads_library_once(client, method, path, *, params=None, body=None, config_st
         headers["X-CCL-STR"] = config_str
     try:
         if method == "GET":
-            resp = client.session.get(ADS_LIBRARY + path, params=params, headers=headers, timeout=API_TIMEOUT)
+            resp = client.session.get(ADS_LIBRARY + path, params=params, headers=headers, timeout=_timeout(API_TIMEOUT))
         else:
-            resp = client.session.post(ADS_LIBRARY + path, params=params, json=body, headers=headers, timeout=API_TIMEOUT)
+            resp = client.session.post(ADS_LIBRARY + path, params=params, json=body, headers=headers, timeout=_timeout(API_TIMEOUT))
+    except TikTokTimeout:
+        raise
     except Exception as e:
-        raise TikTokUpstreamError(f"request failed: {type(e).__name__}: {e}")
+        raise _transport_error(e) from None
     status = resp.status_code
     if status in (401, 403, 429):
         raise TikTokBlocked(f"HTTP {status} on {path}")
@@ -525,6 +580,9 @@ def ads_library(method, path, *, params=None, body=None, not_found=None):
         try:
             config_str, _ = _ads_library_regions(client)
             status, payload = _ads_library_once(client, method, path, params=params, body=body, config_str=config_str)
+        except TikTokTimeout:
+            client.close()
+            raise
         except TikTokUpstreamError as e:
             last = e
             client.close()
@@ -556,6 +614,9 @@ def ads_library_regions():
         client = _acquire(default_country())
         try:
             _, regions = _ads_library_regions(client)
+        except TikTokTimeout:
+            client.close()
+            raise
         except TikTokUpstreamError as e:
             last = e
             client.close()
@@ -591,11 +652,14 @@ def creative_center(path, params, *, not_found=()):
             "user-sign": _creative_center_sign(user_id, timestamp),
         }
         try:
-            resp = client.session.get(CREATIVE_CENTER + path, params=params, headers=headers, timeout=API_TIMEOUT)
+            resp = client.session.get(CREATIVE_CENTER + path, params=params, headers=headers, timeout=_timeout(API_TIMEOUT))
             payload = resp.json()
-        except Exception as e:
-            last = TikTokUpstreamError(f"request failed: {type(e).__name__}: {e}")
+        except TikTokTimeout:
             client.close()
+            raise
+        except Exception as e:
+            client.close()
+            last = _transport_error(e)
             continue
         _release(client)
         if not isinstance(payload, dict):
@@ -622,7 +686,7 @@ def run_parallel(fns):
     if len(fns) == 1:
         return [fns[0]()]
     with ThreadPoolExecutor(max_workers=min(FANOUT_WORKERS, len(fns))) as ex:
-        futures = [ex.submit(fn) for fn in fns]
+        futures = [ex.submit(contextvars.copy_context().run, fn) for fn in fns]
         return [f.result() for f in futures]
 
 
